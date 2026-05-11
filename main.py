@@ -25,6 +25,7 @@ CURRENT_FILL = (247, 222, 185, 255)
 CURRENT_EDGE = (233, 171, 81, 255)
 OVERDUE = (233, 171, 81, 255)
 HATCH = (85, 85, 85, 255)
+METRIC_HEADERS = ("PLAN\nSTART", "ACTUAL\nSTART", "PLAN\nDURATION", "ACTUAL\nDURATION")
 
 
 @dataclass(frozen=True)
@@ -65,13 +66,14 @@ class Layout:
     month_label_bottom_y: int
     month_number_y: int
     activity_x: int
-    start_x: int
-    duration_x: int
+    metric_xs: tuple[int, int, int, int]
+    metric_header_bottom_y: int
     header_y: int
     row_label_x: int
     row_text_offset_y: int
     value_text_offset_y: int
     header_font_size: int
+    metric_header_font_size: int
     row_font_size: int
     value_font_size: int
     month_font_size: int
@@ -90,7 +92,7 @@ class Layout:
 PLAN_LAYOUT = Layout(
     width=2726,
     height=615,
-    plot_left=476,
+    plot_left=452,
     plot_right=2720,
     header_line_y=202,
     bottom_line_y=610,
@@ -100,15 +102,16 @@ PLAN_LAYOUT = Layout(
     month_label_bottom_y=164,
     month_number_y=188,
     activity_x=37,
-    start_x=255,
-    duration_x=403,
+    metric_xs=(220, 272, 324, 376),
+    metric_header_bottom_y=194,
     header_y=153,
     row_label_x=36,
     row_text_offset_y=27,
     value_text_offset_y=27,
     header_font_size=24,
+    metric_header_font_size=16,
     row_font_size=18,
-    value_font_size=25,
+    value_font_size=23,
     month_font_size=23,
     number_font_size=23,
 )
@@ -116,7 +119,7 @@ PLAN_LAYOUT = Layout(
 ACTUAL_LAYOUT = Layout(
     width=1408,
     height=308,
-    plot_left=252,
+    plot_left=240,
     plot_right=1404,
     header_line_y=96,
     bottom_line_y=305,
@@ -126,13 +129,14 @@ ACTUAL_LAYOUT = Layout(
     month_label_bottom_y=78,
     month_number_y=88,
     activity_x=23,
-    start_x=134,
-    duration_x=213,
+    metric_xs=(105, 138, 171, 204),
+    metric_header_bottom_y=90,
     header_y=66,
     row_label_x=23,
     row_text_offset_y=18,
     value_text_offset_y=17,
     header_font_size=11,
+    metric_header_font_size=8,
     row_font_size=12,
     value_font_size=12,
     month_font_size=8,
@@ -367,9 +371,18 @@ def period_center(layout: Layout, period_number: int, period_count: int) -> floa
     return layout.plot_left + (period_number - 0.5) * period_width(layout, period_count)
 
 
-def text_size(text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
-    box = font.getbbox(text)
-    return box[2] - box[0], box[3] - box[1]
+def text_size(text: str, font: ImageFont.ImageFont, *, spacing: int = 0) -> tuple[int, int]:
+    if "\n" in text:
+        box = ImageDraw.Draw(Image.new("RGBA", (1, 1))).multiline_textbbox(
+            (0, 0),
+            text,
+            font=font,
+            spacing=spacing,
+            align="center",
+        )
+    else:
+        box = font.getbbox(text)
+    return math.ceil(box[2] - box[0]), math.ceil(box[3] - box[1])
 
 
 def draw_centered_text(
@@ -388,11 +401,16 @@ def draw_rotated_label(
     bottom_y: int,
     text: str,
     font: ImageFont.ImageFont,
+    *,
+    spacing: int = 0,
 ) -> None:
-    width, height = text_size(text, font)
+    width, height = text_size(text, font, spacing=spacing)
     label = Image.new("RGBA", (width + 4, height + 4), (255, 255, 255, 0))
     label_draw = ImageDraw.Draw(label)
-    label_draw.text((2, 2), text, font=font, fill=HEADER_TEXT)
+    if "\n" in text:
+        label_draw.multiline_text((2, 2), text, font=font, fill=HEADER_TEXT, spacing=spacing, align="center")
+    else:
+        label_draw.text((2, 2), text, font=font, fill=HEADER_TEXT)
     rotated = label.rotate(90, expand=True, resample=Image.Resampling.BICUBIC)
     x = round(x_center - rotated.width / 2)
     y = bottom_y - rotated.height
@@ -445,28 +463,16 @@ def draw_headers(
     layout: Layout,
     *,
     periods: Sequence[str],
-    start_header: str,
-    duration_header: str,
 ) -> None:
     header_font = load_font(layout.header_font_size, bold=True)
+    metric_header_font = load_font(layout.metric_header_font_size, bold=True)
     month_font = load_font(layout.month_font_size, bold=True)
     number_font = load_font(layout.number_font_size, bold=True)
 
     draw.text((layout.activity_x, layout.header_y), "ACTIVITY", font=header_font, fill=HEADER_TEXT, anchor="lm")
 
-    if "\n" in start_header:
-        line1, line2 = start_header.split("\n", maxsplit=1)
-        draw_centered_text(draw, (layout.start_x, layout.header_y - 14), line1, header_font, HEADER_TEXT)
-        draw_centered_text(draw, (layout.start_x, layout.header_y + 9), line2, header_font, HEADER_TEXT)
-    else:
-        draw_centered_text(draw, (layout.start_x, layout.header_y), start_header, header_font, HEADER_TEXT)
-
-    if "\n" in duration_header:
-        line1, line2 = duration_header.split("\n", maxsplit=1)
-        draw_centered_text(draw, (layout.duration_x, layout.header_y - 24), line1, header_font, HEADER_TEXT)
-        draw_centered_text(draw, (layout.duration_x, layout.header_y + 9), line2, header_font, HEADER_TEXT)
-    else:
-        draw_centered_text(draw, (layout.duration_x, layout.header_y), duration_header, header_font, HEADER_TEXT)
+    for x_center, label in zip(layout.metric_xs, METRIC_HEADERS, strict=True):
+        draw_rotated_label(image, x_center, layout.metric_header_bottom_y, label, metric_header_font, spacing=0)
 
     period_count = len(periods)
     for index, label in enumerate(periods, start=1):
@@ -483,11 +489,11 @@ def draw_headers(
 def draw_table_values(
     draw: ImageDraw.ImageDraw,
     layout: Layout,
-    rows: Sequence[tuple[str, int, int]],
+    rows: Sequence[tuple[str, int, int, int, int]],
 ) -> None:
     row_font = load_font(layout.row_font_size, bold=True)
     value_font = load_font(layout.value_font_size)
-    for index, (name, start, duration) in enumerate(rows):
+    for index, (name, plan_start, actual_start, plan_duration, actual_duration) in enumerate(rows):
         top = layout.row_tops[index]
         draw.text(
             (layout.row_label_x, top + layout.row_text_offset_y),
@@ -496,20 +502,15 @@ def draw_table_values(
             fill=TEXT,
             anchor="lm",
         )
-        draw_centered_text(
-            draw,
-            (layout.start_x, top + layout.value_text_offset_y),
-            str(start),
-            value_font,
-            TEXT,
-        )
-        draw_centered_text(
-            draw,
-            (layout.duration_x, top + layout.value_text_offset_y),
-            str(duration),
-            value_font,
-            TEXT,
-        )
+        values = (plan_start, actual_start, plan_duration, actual_duration)
+        for x_center, value in zip(layout.metric_xs, values, strict=True):
+            draw_centered_text(
+                draw,
+                (x_center, top + layout.value_text_offset_y),
+                str(value),
+                value_font,
+                TEXT,
+            )
 
 
 def draw_bar(
@@ -545,13 +546,14 @@ def render_plan(tasks: Sequence[Task], periods: Sequence[str]) -> Image.Image:
         draw,
         layout,
         periods=periods,
-        start_header="PLAN START",
-        duration_header="PLAN\nDURATION",
     )
     draw_table_values(
         draw,
         layout,
-        [(task.name, task.plan_start, task.plan_duration) for task in tasks],
+        [
+            (task.name, task.plan_start, task.actual_start, task.plan_duration, task.actual_duration)
+            for task in tasks
+        ],
     )
     draw_frame(draw, layout)
     return image
@@ -603,13 +605,14 @@ def render_actual(tasks: Sequence[Task], periods: Sequence[str], *, current_peri
         draw,
         layout,
         periods=periods,
-        start_header="ACTUAL/PLAN\nSTART",
-        duration_header="ACTUAL/PLAN\nDURATION",
     )
     draw_table_values(
         draw,
         layout,
-        [(task.name, task.actual_start, task.actual_duration) for task in tasks],
+        [
+            (task.name, task.plan_start, task.actual_start, task.plan_duration, task.actual_duration)
+            for task in tasks
+        ],
     )
     draw_frame(draw, layout)
     return image
