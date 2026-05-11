@@ -1,15 +1,21 @@
 # Gantt PNG Generator
 
-Generate the two sample-style Gantt diagrams:
+Generate the default actual/progress Gantt diagram:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python main.py
+uv run python main.py
 ```
 
-The default input is `gantt_data.json`. Use another data file with:
+The default input is `gantt_data.json`. Export a named image to `exports/` with:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python main.py --data path/to/data.json
+uv run python main.py --data gantt_data.json --output-dir exports --output-name r4
+```
+
+Choose which chart to render with `--chart actual` or `--chart plan`. The old two-file behavior is still available with:
+
+```bash
+uv run python main.py --chart both
 ```
 
 The JSON file should define `current_period`, optional `periods`, and a dynamic `stages` list:

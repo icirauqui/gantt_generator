@@ -21,7 +21,7 @@ PURPLE = (115, 87, 115, 255)
 TEXT = (38, 38, 38, 255)
 HEADER_TEXT = (64, 64, 64, 255)
 RED = (192, 0, 0, 255)
-CURRENT_FILL = (247, 222, 185, 255)
+CURRENT_FILL = (247, 222, 185, 120)
 CURRENT_EDGE = (233, 171, 81, 255)
 OVERDUE = (233, 171, 81, 255)
 HATCH = (85, 85, 85, 255)
@@ -560,7 +560,7 @@ def render_plan(tasks: Sequence[Task], periods: Sequence[str]) -> Image.Image:
 
 
 def draw_current_marker(
-    draw: ImageDraw.ImageDraw,
+    image: Image.Image,
     layout: Layout,
     current_period: int,
     period_count: int,
@@ -569,9 +569,12 @@ def draw_current_marker(
         return
     x0 = period_left(layout, current_period, period_count)
     x1 = period_right(layout, current_period, period_count) - 1
-    draw.rectangle((x0, layout.current_top_y, x1, layout.bottom_line_y - 1), fill=CURRENT_FILL)
-    draw.line((x0, layout.current_top_y, x0, layout.bottom_line_y - 1), fill=CURRENT_EDGE, width=1)
-    draw.line((x1, layout.current_top_y, x1, layout.bottom_line_y - 1), fill=CURRENT_EDGE, width=1)
+    overlay = Image.new("RGBA", image.size, (255, 255, 255, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rectangle((x0, layout.current_top_y, x1, layout.bottom_line_y - 1), fill=CURRENT_FILL)
+    overlay_draw.line((x0, layout.current_top_y, x0, layout.bottom_line_y - 1), fill=CURRENT_EDGE, width=1)
+    overlay_draw.line((x1, layout.current_top_y, x1, layout.bottom_line_y - 1), fill=CURRENT_EDGE, width=1)
+    image.alpha_composite(overlay)
 
 
 def render_actual(tasks: Sequence[Task], periods: Sequence[str], *, current_period: int) -> Image.Image:
@@ -598,7 +601,7 @@ def render_actual(tasks: Sequence[Task], periods: Sequence[str], *, current_peri
         if overrun_duration > 0:
             draw_bar(draw, layout, period_count, index, overrun_start, overrun_duration, OVERDUE)
 
-    draw_current_marker(draw, layout, current_period, period_count)
+    draw_current_marker(image, layout, current_period, period_count)
 
     draw_headers(
         image,
@@ -641,16 +644,42 @@ def compare_images(generated: Path, sample: Path) -> tuple[float, float, tuple[i
             return rms, changed_percent, diff.getbbox()
 
 
-def render_all(output_dir: Path, chart_data: ChartData, *, current_period: int) -> dict[str, Path]:
-    outputs = {
-        "original": output_dir / "original.png",
-        "actual": output_dir / "actual.png",
-    }
-    save_image(render_plan(chart_data.tasks, chart_data.periods), outputs["original"])
-    save_image(
-        render_actual(chart_data.tasks, chart_data.periods, current_period=current_period),
-        outputs["actual"],
+def with_png_suffix(name: str) -> str:
+    path = Path(name)
+    if path.suffix:
+        return name
+    return f"{name}.png"
+
+
+def render_outputs(
+    output_dir: Path,
+    chart_data: ChartData,
+    *,
+    chart: str,
+    output_name: str | None,
+    current_period: int,
+) -> dict[str, Path]:
+    if chart == "both":
+        outputs = {
+            "plan": output_dir / "original.png",
+            "actual": output_dir / "actual.png",
+        }
+        save_image(render_plan(chart_data.tasks, chart_data.periods), outputs["plan"])
+        save_image(
+            render_actual(chart_data.tasks, chart_data.periods, current_period=current_period),
+            outputs["actual"],
+        )
+        return outputs
+
+    filename = with_png_suffix(output_name or f"{chart}.png")
+    output_path = output_dir / filename
+    image = (
+        render_plan(chart_data.tasks, chart_data.periods)
+        if chart == "plan"
+        else render_actual(chart_data.tasks, chart_data.periods, current_period=current_period)
     )
+    outputs = {chart: output_path}
+    save_image(image, output_path)
     return outputs
 
 
@@ -667,6 +696,17 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
         help=f"Directory for generated PNG files. Default: {DEFAULT_OUTPUT_DIR}",
+    )
+    parser.add_argument(
+        "--output-name",
+        default=None,
+        help="Output filename for a single chart. '.png' is added when omitted.",
+    )
+    parser.add_argument(
+        "--chart",
+        choices=("actual", "plan", "both"),
+        default="actual",
+        help="Chart to render. Default: actual.",
     )
     parser.add_argument(
         "--current-period",
@@ -690,14 +730,21 @@ def main() -> None:
     current_period = args.current_period if args.current_period is not None else chart_data.current_period
     chart_data = replace(chart_data, current_period=current_period)
     validate_chart_data(chart_data)
-    outputs = render_all(args.output_dir, chart_data, current_period=current_period)
+    outputs = render_outputs(
+        args.output_dir,
+        chart_data,
+        chart=args.chart,
+        output_name=args.output_name,
+        current_period=current_period,
+    )
 
     for name, path in outputs.items():
         print(f"wrote {name}: {path}")
 
     if args.compare_samples:
+        sample_names = {"plan": "original", "actual": "actual"}
         for name, generated in outputs.items():
-            sample = SAMPLES_DIR / f"{name}.png"
+            sample = SAMPLES_DIR / f"{sample_names[name]}.png"
             if not sample.exists():
                 print(f"missing sample for {name}: {sample}")
                 continue
